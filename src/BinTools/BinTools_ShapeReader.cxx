@@ -317,6 +317,9 @@ TopoDS_Shape BinTools_ShapeReader::ReadShape(BinTools_IStream& theStream)
 const TopLoc_Location* BinTools_ShapeReader::ReadLocation(BinTools_IStream& theStream)
 {
   static const TopLoc_Location* anEmptyLoc = new TopLoc_Location;
+  const Standard_Boolean toCheckFinite =
+    BinTools::GeometryPolicy(theStream.Stream()) ==
+      BinTools::GeometryReadPolicy::PreserveStoredLinePlaneCircleSphereRigidTransforms;
 
   uint64_t                   aPosition = theStream.Position();
   const BinTools_ObjectType& aType     = theStream.ReadType();
@@ -327,11 +330,17 @@ const TopLoc_Location* BinTools_ShapeReader::ReadLocation(BinTools_IStream& theS
     uint64_t               aRef   = theStream.ReadReference();
     const TopLoc_Location* aFound = myLocationPos.Seek(aRef);
     if (aFound) // the location is already retrieved
+    {
+      if (toCheckFinite)
+        BinTools::CheckFiniteLocation(*aFound);
       return aFound;
+    }
     uint64_t aCurrent = theStream.Position();
     theStream.GoTo(aRef); // go to the referenced position
     const TopLoc_Location* aResult = ReadLocation(theStream);
     theStream.GoTo(aCurrent); // returns to the current position
+    if (toCheckFinite)
+      BinTools::CheckFiniteLocation(*aResult);
     return aResult;
   }
   // read the location directly from the stream
@@ -346,8 +355,17 @@ const TopLoc_Location* BinTools_ShapeReader::ReadLocation(BinTools_IStream& theS
   {
     for (const TopLoc_Location* aNextLoc = ReadLocation(theStream); !aNextLoc->IsIdentity();
          aNextLoc                        = ReadLocation(theStream))
-      aLoc = aNextLoc->Powered(theStream.ReadInteger()) * aLoc;
+    {
+      const TopLoc_Location aPowered = aNextLoc->Powered(theStream.ReadInteger());
+      if (toCheckFinite)
+        BinTools::CheckFiniteLocation(aPowered);
+      aLoc = aPowered * aLoc;
+      if (toCheckFinite)
+        BinTools::CheckFiniteLocation(aLoc);
+    }
   }
+  if (toCheckFinite)
+    BinTools::CheckFiniteLocation(aLoc);
   myLocationPos.Bind(aPosition, aLoc);
   return myLocationPos.Seek(aPosition);
 }

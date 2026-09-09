@@ -593,6 +593,9 @@ void BOPTools_AlgoTools2D::MakePCurveOnFace(const TopoDS_Face&              aF,
     aProjCurv.SetDegree(aDegMin, aDegMax);
     aProjCurv.SetMaxSegments(aMaxSegments);
     aProjCurv.SetBndPnt(aBndPnt);
+    // Search must admit the face's existing geometric uncertainty. This does
+    // not change the approximation target or the measured returned tolerance.
+    aMaxDist = Max(aMaxDist > 0.0 ? aMaxDist : 100.0 * aTR, BRep_Tool::Tolerance(aF));
     aProjCurv.SetMaxDist(aMaxDist);
     aProjCurv.Perform(aBAHC);
     ProjLib::MakePCurveOfType(aProjCurv, aC2D);

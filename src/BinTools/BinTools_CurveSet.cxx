@@ -354,6 +354,23 @@ static Standard_IStream& operator>>(Standard_IStream& IS, gp_Dir& D)
 
 static Standard_IStream& operator>>(Standard_IStream& IS, Handle(Geom_Line)& L)
 {
+  const auto aPolicy = BinTools::GeometryPolicy(IS);
+  if (aPolicy == BinTools::GeometryReadPolicy::PreserveStoredLinePlane
+      || aPolicy == BinTools::GeometryReadPolicy::PreserveStoredLinePlaneCircle
+      || aPolicy == BinTools::GeometryReadPolicy::PreserveStoredLinePlaneCircleSphere
+      || aPolicy == BinTools::GeometryReadPolicy::PreserveStoredLinePlaneCircleSphereRigidTransforms)
+  {
+    gp_Pnt P;
+    Standard_Real X=0.,Y=0.,Z=0.;
+    IS >> P;
+    BinTools::GetReal(IS,X); BinTools::GetReal(IS,Y); BinTools::GetReal(IS,Z);
+    if (!IS) throw Standard_Failure("incomplete stored Line payload");
+    gp_StoredRepresentation::Finite(P.X());
+    gp_StoredRepresentation::Finite(P.Y());
+    gp_StoredRepresentation::Finite(P.Z());
+    L = new Geom_Line(P,gp_Dir::FromStoredCoordinates(gp_XYZ(X,Y,Z)));
+    return IS;
+  }
   gp_Pnt P(0., 0., 0.);
   gp_Dir AX(1., 0., 0.);
   IS >> P >> AX;
@@ -365,6 +382,23 @@ static Standard_IStream& operator>>(Standard_IStream& IS, Handle(Geom_Line)& L)
 
 static Standard_IStream& operator>>(Standard_IStream& IS, Handle(Geom_Circle)& C)
 {
+  const auto aPolicy = BinTools::GeometryPolicy(IS);
+  if (aPolicy == BinTools::GeometryReadPolicy::PreserveStoredLinePlaneCircle
+      || aPolicy == BinTools::GeometryReadPolicy::PreserveStoredLinePlaneCircleSphere
+      || aPolicy == BinTools::GeometryReadPolicy::PreserveStoredLinePlaneCircleSphereRigidTransforms)
+  {
+    gp_Pnt P;
+    Standard_Real A[9] = {}, R = 0.;
+    IS >> P;
+    for (Standard_Integer i=0;i<9;++i) BinTools::GetReal(IS,A[i]);
+    BinTools::GetReal(IS,R);
+    if (!IS) throw Standard_Failure("incomplete stored Circle payload");
+    gp_StoredRepresentation::Finite(R);
+    if (R < 0.0) throw Standard_ConstructionError("negative stored Circle radius");
+    C = new Geom_Circle(gp_Ax2::FromStoredFrame(P,gp_XYZ(A[0],A[1],A[2]),
+      gp_XYZ(A[3],A[4],A[5]),gp_XYZ(A[6],A[7],A[8])),R);
+    return IS;
+  }
   gp_Pnt        P(0., 0., 0.);
   gp_Dir        A(1., 0., 0.), AX(1., 0., 0.), AY(1., 0., 0.);
   Standard_Real R = 0.;

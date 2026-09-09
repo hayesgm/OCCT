@@ -20,6 +20,10 @@
 #include <BRep_TFace.hxx>
 #include <BRep_Tool.hxx>
 #include <BRepTools.hxx>
+#include <CSLib.hxx>
+#include <CSLib_NormalStatus.hxx>
+#include <GeomAdaptor_Surface.hxx>
+#include <TColgp_Array2OfVec.hxx>
 #include <Geom2d_Curve.hxx>
 #include <Geom2d_Line.hxx>
 #include <Geom2d_TrimmedCurve.hxx>
@@ -355,6 +359,32 @@ void BOPTools_AlgoTools3D::GetNormalToFaceOnEdge(const TopoDS_Edge&             
   gp_Dir aDD1U(aD1U);
   gp_Dir aDD1V(aD1V);
 
+  if (aDD1U.XYZ().Crossed(aDD1V.XYZ()).Modulus() <= gp::Resolution()
+      && GeomAdaptor_Surface(aS1).GetType() == GeomAbs_SurfaceOfExtrusion)
+  {
+    Standard_Real aUmin, aUmax, aVmin, aVmax;
+    BRepTools::UVBounds(aF1, aUmin, aUmax, aVmin, aVmax);
+    const Standard_Boolean atFirst = Abs(U - aUmin) < Precision::PConfusion();
+    const Standard_Boolean atLast = Abs(U - aUmax) < Precision::PConfusion();
+    if (atFirst != atLast)
+    {
+      // Use the analytic one-sided normal limit at a singular extrusion edge.
+      // Interior/ambiguous singularities keep the original failure behavior.
+      gp_Vec aD2U, aD2V, aD2UV;
+      aS1->D2(U, V, aP, aD1U, aD1V, aD2U, aD2V, aD2UV);
+      TColgp_Array2OfVec aDerivatives(0, 1, 0, 1);
+      aDerivatives.Init(gp_Vec(0, 0, 0));
+      aDerivatives(0, 0) = aD1U.Crossed(aD1V);
+      aDerivatives(1, 0) = aD2U.Crossed(aD1V) + aD1U.Crossed(aD2UV);
+      aDerivatives(0, 1) = aD2UV.Crossed(aD1V) + aD1U.Crossed(aD2V);
+      CSLib_NormalStatus aStatus = CSLib_Singular;
+      Standard_Integer anOrderU = 0, anOrderV = 0;
+      CSLib::Normal(1, aDerivatives, Precision::Angular(), U, V,
+                    aUmin, aUmax, aVmin, aVmax, aStatus, aDNF1, anOrderU, anOrderV);
+      if (aStatus == CSLib_Defined)
+        return;
+    }
+  }
   aDNF1 = aDD1U ^ aDD1V;
 }
 

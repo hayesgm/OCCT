@@ -16,6 +16,7 @@
 #define _gp_Trsf_HeaderFile
 
 #include <gp_TrsfForm.hxx>
+#include <gp_StoredRepresentation.hxx>
 #include <gp_Mat.hxx>
 #include <gp_XYZ.hxx>
 #include <NCollection_Mat4.hxx>
@@ -212,6 +213,31 @@ public:
                                  const Standard_Real a32,
                                  const Standard_Real a33,
                                  const Standard_Real a34);
+
+  //! Restore twelve stored rigid-transform coefficients without reconstruction.
+  //! Both rows and columns must satisfy the bounded binary64 frame domain.
+  //! Nonunit scales, shear and unsupported arithmetic domains are rejected.
+  //! Reflections retain negative scale and a right-handed homogeneous matrix.
+  static gp_Trsf FromStoredRigidRepresentation(const gp_Mat& theMatrix,
+                                               const gp_XYZ& theTranslation)
+  {
+    gp_StoredRepresentation::Arithmetic();
+    for (Standard_Integer i = 1; i <= 3; ++i)
+      gp_StoredRepresentation::NormalOrZero(theTranslation.Coord(i));
+    gp_StoredRepresentation::Frame(theMatrix.Column(3), theMatrix.Column(1), theMatrix.Column(2));
+    gp_StoredRepresentation::Frame(theMatrix.Row(3), theMatrix.Row(1), theMatrix.Row(2));
+    const auto aDet = gp_StoredRepresentation::FrameDeterminant(
+      theMatrix.Column(3), theMatrix.Column(1), theMatrix.Column(2));
+    gp_Trsf aResult;
+    aResult.scale = aDet.Lo > 0.0 ? 1.0 : -1.0;
+    aResult.matrix = theMatrix;
+    if (aResult.scale < 0.0)
+      aResult.matrix.Multiply(-1.0);
+    aResult.loc = theTranslation;
+    // Do not classify near-identity coefficients into a shortcut that drops them.
+    aResult.shape = gp_CompoundTrsf;
+    return aResult;
+  }
 
   //! Returns true if the determinant of the vectorial part of
   //! this transformation is negative.

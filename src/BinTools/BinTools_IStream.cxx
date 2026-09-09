@@ -12,6 +12,7 @@
 // commercial license or contractual agreement.
 
 #include <BinTools_IStream.hxx>
+#include <BinTools.hxx>
 #include <Storage_StreamTypeMismatchError.hxx>
 
 //=================================================================================================
@@ -207,6 +208,15 @@ BinTools_IStream& BinTools_IStream::operator>>(gp_Trsf& theValue)
   *this >> aV1[0] >> aV1[1] >> aV1[2] >> aV[0];
   *this >> aV2[0] >> aV2[1] >> aV2[2] >> aV[1];
   *this >> aV3[0] >> aV3[1] >> aV3[2] >> aV[2];
+  if (BinTools::GeometryPolicy(*myStream)
+      == BinTools::GeometryReadPolicy::PreserveStoredLinePlaneCircleSphereRigidTransforms)
+  {
+    const gp_Mat aMatrix(aV1[0], aV1[1], aV1[2],
+                        aV2[0], aV2[1], aV2[2],
+                        aV3[0], aV3[1], aV3[2]);
+    theValue = gp_Trsf::FromStoredRigidRepresentation(aMatrix, gp_XYZ(aV[0], aV[1], aV[2]));
+    return *this;
+  }
   theValue.SetValues(aV1[0],
                      aV1[1],
                      aV1[2],

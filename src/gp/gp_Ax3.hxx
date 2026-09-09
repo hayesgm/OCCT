@@ -64,6 +64,23 @@ class gp_Ax3
 public:
   DEFINE_STANDARD_ALLOC
 
+  //! Restores all saved axes through owner-member access. The domain is bounded
+  //! roundoff-consistent native representation, not exact mathematical orthogonality.
+  //! Invalid input refuses; no axis is normalized or reconstructed.
+  static gp_Ax3 FromStoredFrame(const gp_Pnt& theOrigin, const gp_XYZ& theZ,
+                               const gp_XYZ& theX, const gp_XYZ& theY)
+  {
+    gp_StoredRepresentation::Finite(theOrigin.X());
+    gp_StoredRepresentation::Finite(theOrigin.Y());
+    gp_StoredRepresentation::Finite(theOrigin.Z());
+    gp_StoredRepresentation::Frame(theZ,theX,theY);
+    gp_Ax3 aResult;
+    aResult.axis = gp_Ax1(theOrigin,gp_Dir::FromStoredCoordinates(theZ));
+    aResult.vxdir = gp_Dir::FromStoredCoordinates(theX);
+    aResult.vydir = gp_Dir::FromStoredCoordinates(theY);
+    return aResult;
+  }
+
   //! Creates an object corresponding to the reference
   //! coordinate system (OXYZ).
   gp_Ax3()

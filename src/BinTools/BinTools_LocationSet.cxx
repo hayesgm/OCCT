@@ -43,6 +43,16 @@ static Standard_IStream& operator>>(Standard_IStream& IS, gp_Trsf& T)
   BinTools::GetReal(IS, V3[2]);
   BinTools::GetReal(IS, V[2]);
 
+  // GetReal throws on a short read, so no partial coefficient reaches the factory.
+  if (BinTools::GeometryPolicy(IS)
+      == BinTools::GeometryReadPolicy::PreserveStoredLinePlaneCircleSphereRigidTransforms)
+  {
+    const gp_Mat aMatrix(V1[0], V1[1], V1[2],
+                        V2[0], V2[1], V2[2],
+                        V3[0], V3[1], V3[2]);
+    T = gp_Trsf::FromStoredRigidRepresentation(aMatrix, gp_XYZ(V[0], V[1], V[2]));
+    return IS;
+  }
   T.SetValues(V1[0], V1[1], V1[2], V[0], V2[0], V2[1], V2[2], V[1], V3[0], V3[1], V3[2], V[2]);
   return IS;
 }
@@ -188,6 +198,9 @@ void BinTools_LocationSet::Read(Standard_IStream& IS)
 {
 
   myMap.Clear();
+  const Standard_Boolean toCheckFinite =
+    BinTools::GeometryPolicy(IS) ==
+      BinTools::GeometryReadPolicy::PreserveStoredLinePlaneCircleSphereRigidTransforms;
   char             buffer[255];
   Standard_Integer l1, p;
 
@@ -227,7 +240,12 @@ void BinTools_LocationSet::Read(Standard_IStream& IS)
         {
           BinTools::GetInteger(IS, p);
           TopLoc_Location L1 = myMap(l1);
-          L                  = L1.Powered(p) * L;
+          const TopLoc_Location aPowered = L1.Powered(p);
+          if (toCheckFinite)
+            BinTools::CheckFiniteLocation(aPowered);
+          L = aPowered * L;
+          if (toCheckFinite)
+            BinTools::CheckFiniteLocation(L);
           BinTools::GetInteger(IS, l1);
         }
       }
@@ -237,6 +255,8 @@ void BinTools_LocationSet::Read(Standard_IStream& IS)
         aMsg << "Unexpected location's type = " << aTypLoc << std::endl;
         throw Standard_Failure(aMsg.str().c_str());
       }
+      if (toCheckFinite)
+        BinTools::CheckFiniteLocation(L);
       if (!L.IsIdentity())
         myMap.Add(L);
     }

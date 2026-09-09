@@ -29,6 +29,7 @@
 #include <gp_Pnt.hxx>
 #include <gp_Pnt2d.hxx>
 #include <IntTools_FClass2d.hxx>
+#include "IntTools_FClass2dProjection.pxx"
 #include <Precision.hxx>
 #include <TColgp_Array1OfPnt2d.hxx>
 #include <TColgp_SequenceOfPnt2d.hxx>
@@ -336,12 +337,9 @@ void IntTools_FClass2d::Init(const TopoDS_Face& aFace, const Standard_Real TolUV
         ii = SeqPnt2d.Length();
         if (ii > (Avant + 4))
         {
-          Standard_Real ul, dU, dV;
-          gp_Pnt2d      Pp;
-          //
-          gp_Lin2d Lin(SeqPnt2d(ii - 2), gp_Dir2d(gp_Vec2d(SeqPnt2d(ii - 2), SeqPnt2d(ii))));
-          ul = ElCLib::Parameter(Lin, SeqPnt2d(ii - 1));
-          Pp = ElCLib::Value(ul, Lin);
+          Standard_Real dU, dV;
+          const gp_Pnt2d Pp = IntTools_FClass2dProjection(
+            SeqPnt2d(ii - 2), SeqPnt2d(ii - 1), SeqPnt2d(ii));
           dU = Abs(Pp.X() - SeqPnt2d(ii - 1).X());
           dV = Abs(Pp.Y() - SeqPnt2d(ii - 1).Y());
           if (dU > FlecheU)
@@ -477,9 +475,8 @@ void IntTools_FClass2d::Init(const TopoDS_Face& aFace, const Standard_Real TolUV
               if (nbp > 2)
               {
                 Standard_Integer ii = SeqPnt2d.Length();
-                gp_Lin2d Lin(SeqPnt2d(ii - 2), gp_Dir2d(gp_Vec2d(SeqPnt2d(ii - 2), SeqPnt2d(ii))));
-                Standard_Real ul = ElCLib::Parameter(Lin, SeqPnt2d(ii - 1));
-                gp_Pnt2d      Pp = ElCLib::Value(ul, Lin);
+                const gp_Pnt2d Pp = IntTools_FClass2dProjection(
+                  SeqPnt2d(ii - 2), SeqPnt2d(ii - 1), SeqPnt2d(ii));
                 Standard_Real dU = Abs(Pp.X() - SeqPnt2d(ii - 1).X());
                 Standard_Real dV = Abs(Pp.Y() - SeqPnt2d(ii - 1).Y());
                 if (dU > FlecheU)

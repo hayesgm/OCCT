@@ -638,6 +638,35 @@ void ProjLib_ProjectedCurve::Perform(const Handle(Adaptor3d_Curve)& C)
       {
         Continuity = GeomAbs_C0;
       }
+      else if (mySurface->GetType() == GeomAbs_SurfaceOfExtrusion)
+      {
+        gp_Pnt2d aSinglePoint;
+        if (!HProjector->IsSinglePnt(1, aSinglePoint))
+        {
+          // At a singular endpoint a spatial tangent outside the image of the
+          // surface Jacobian has no finite UV derivative. Keep the positional
+          // approximation contract instead of imposing an invalid C1 constraint.
+          const auto needsPositionalBoundary = [&](const Standard_Real theT) {
+            const gp_Pnt2d aUV = HProjector->Value(theT);
+            gp_Pnt aC, aS;
+            gp_Vec aTangent, aDU, aDV;
+            myCurve->D1(theT, aC, aTangent);
+            mySurface->D1(aUV.X(), aUV.Y(), aS, aDU, aDV);
+            const Standard_Real aAngular2 = Precision::Angular() * Precision::Angular();
+            if (aC.SquareDistance(aS) > myTolerance * myTolerance
+                || aDU.Crossed(aDV).SquareMagnitude()
+                     > aAngular2 * aDU.SquareMagnitude() * aDV.SquareMagnitude())
+              return Standard_False;
+            const gp_Vec& anAxis = aDU.SquareMagnitude() > aDV.SquareMagnitude() ? aDU : aDV;
+            if (anAxis.SquareMagnitude() <= gp::Resolution() * gp::Resolution())
+              return aTangent.SquareMagnitude() > gp::Resolution() * gp::Resolution();
+            return aTangent.Crossed(anAxis).SquareMagnitude()
+                   > aAngular2 * aTangent.SquareMagnitude() * anAxis.SquareMagnitude();
+          };
+          if (needsPositionalBoundary(Udeb) || needsPositionalBoundary(Ufin))
+            Continuity = GeomAbs_C0;
+        }
+      }
       Standard_Integer MaxDegree = 14;
       if (myDegMax > 0)
       {

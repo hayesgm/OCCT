@@ -16,21 +16,63 @@
 #ifndef _BinTools_HeaderFile
 #define _BinTools_HeaderFile
 
+// Compile-time availability of the explicit stored rigid-transform read policy.
+#define BINTOOLS_STORED_RIGID_TRANSFORMS 1
+
 #include <BinTools_FormatVersion.hxx>
 #include <Standard.hxx>
 #include <Standard_DefineAlloc.hxx>
 #include <Standard_Handle.hxx>
 
+class Geom_SphericalSurface;
 #include <Standard_Real.hxx>
 #include <Message_ProgressRange.hxx>
 
 class TopoDS_Shape;
+class TopLoc_Location;
 
 //! Tool to keep shapes in binary format
 class BinTools
 {
 public:
   DEFINE_STANDARD_ALLOC
+
+  enum class GeometryReadPolicy {
+    Reconstruct = 0,
+    PreserveStoredLinePlane = 1,
+    PreserveStoredLinePlaneCircle = 2,
+    PreserveStoredLinePlaneCircleSphere = 3,
+    PreserveStoredLinePlaneCircleSphereRigidTransforms = 4
+  };
+
+  //! Policy belongs to this input stream, including quick/legacy document reads.
+  //! The ordinary zero-initialized policy remains the unchanged reconstructing reader.
+  Standard_EXPORT static GeometryReadPolicy GeometryPolicy(Standard_IStream& theStream);
+  Standard_EXPORT static GeometryReadPolicy SetGeometryPolicy(Standard_IStream& theStream,
+                                                              GeometryReadPolicy thePolicy);
+
+  //! Scoped opt-in never changes the policy of another stream or a global reader.
+  class GeometryReadScope
+  {
+  public:
+    GeometryReadScope(Standard_IStream& theStream, GeometryReadPolicy thePolicy)
+      : myStream(theStream), myPrevious(SetGeometryPolicy(theStream,thePolicy)) {}
+    ~GeometryReadScope() { SetGeometryPolicy(myStream,myPrevious); }
+    GeometryReadScope(const GeometryReadScope&) = delete;
+    GeometryReadScope& operator=(const GeometryReadScope&) = delete;
+  private:
+    Standard_IStream& myStream;
+    GeometryReadPolicy myPrevious;
+  };
+
+  //! Rejects nonfinite results of location powers/composition without changing
+  //! the transform or datum chain. Readers call this only for the rigid policy.
+  Standard_EXPORT static void CheckFiniteLocation(const TopLoc_Location& theLocation);
+
+  //! Decodes the exact stored Sphere payload used by the preserving policy.
+  //! This is the single validation/factory path for production and causal tests.
+  Standard_EXPORT static Handle(Geom_SphericalSurface)
+    ReadStoredSphericalSurface(Standard_IStream& theStream);
 
   Standard_EXPORT static Standard_OStream& PutReal(Standard_OStream&    OS,
                                                    const Standard_Real& theValue);

@@ -539,6 +539,7 @@ static Standard_Boolean InitialPoint(const gp_Pnt&                    Point,
 
   aExtPS.Perform(Point);
   Standard_Integer argmin   = 0;
+  Standard_Real aBestDistance = RealLast();
   Standard_Real    aMaxDist = theMaxDist;
   if (aMaxDist > 0.)
   {
@@ -566,16 +567,24 @@ static Standard_Boolean InitialPoint(const gp_Pnt&                    Point,
                      FuncTol,
                      Standard_True);
       if (aPrjPS.IsDone())
-        if (argmin == 0 || aExtPS.SquareDistance(i) < aExtPS.SquareDistance(argmin))
+      {
+        // Rank and return the validated root, not the unrefined extrema seed.
+        const gp_Pnt2d aUV = aPrjPS.Solution();
+        const Standard_Real aDistance = Point.SquareDistance(S->Value(aUV.X(), aUV.Y()));
+        if ((aMaxDist <= 0.0 || aDistance <= aMaxDist) && aDistance < aBestDistance)
+        {
           argmin = i;
+          aBestDistance = aDistance;
+          U = aUV.X();
+          V = aUV.Y();
+        }
+      }
     }
   }
   if (argmin == 0)
     return Standard_False;
   else
   {
-    Extrema_POnSurf POnS = aExtPS.Point(argmin);
-    POnS.Parameter(U, V);
     return Standard_True;
   }
 }
@@ -1564,6 +1573,7 @@ void ProjLib_CompProjectedCurve::D0(const Standard_Real U, gp_Pnt2d& P) const
   for (j = 1; j < End; j++)
     if ((U >= mySequence->Value(i)->Value(j).X()) && (U <= mySequence->Value(i)->Value(j + 1).X()))
       break;
+  const Standard_Integer aBracket = j;
 
   //  U0 = mySequence->Value(i)->Value(j).Y();
   //  V0 = mySequence->Value(i)->Value(j).Z();
@@ -1635,7 +1645,66 @@ void ProjLib_CompProjectedCurve::D0(const Standard_Real U, gp_Pnt2d& P) const
                  gp_Pnt2d(mySurface->LastUParameter(), mySurface->LastVParameter()),
                  FuncTol);
   if (aPrjPS.IsDone())
-    P = aPrjPS.Solution();
+  {
+    const gp_Pnt2d aSolution = aPrjPS.Solution();
+    gp_Pnt aTriple(U, aSolution.X(), aSolution.Y());
+    if (mySurface->GetType() == GeomAbs_SurfaceOfExtrusion)
+    {
+      UpdateTripleByTrapCriteria(aTriple);
+      // Near a singular extrusion boundary the stationary equations also have
+      // a saddle branch. Recover from the already-computed continuation bracket
+      // rather than treating a stationary root as a minimum of squared distance.
+      const gp_Pnt aCurvePoint = myCurve->Value(U);
+      const auto isSaddle = [&](const gp_Pnt& theTriple) {
+        gp_Pnt aSurfacePoint;
+        gp_Vec aDU, aDV, aDUU, aDVV, aDUV;
+        mySurface->D2(theTriple.Y(), theTriple.Z(), aSurfacePoint,
+                      aDU, aDV, aDUU, aDVV, aDUV);
+        const gp_Vec aResidual(aCurvePoint, aSurfacePoint);
+        const Standard_Real aH11 = aDU * aDU + aResidual * aDUU;
+        const Standard_Real aH12 = aDU * aDV + aResidual * aDUV;
+        const Standard_Real aH22 = aDV * aDV + aResidual * aDVV;
+        return aH11 < 0.0 || aH22 < 0.0 || aH11 * aH22 - aH12 * aH12 < 0.0;
+      };
+      if (isSaddle(aTriple))
+      {
+        Standard_Real aBestDistance =
+          aCurvePoint.SquareDistance(mySurface->Value(aTriple.Y(), aTriple.Z()));
+        for (Standard_Integer aSeedIndex = aBracket;
+             aSeedIndex <= Min(aBracket + 1, End); ++aSeedIndex)
+        {
+          const gp_Pnt& aSeed = mySequence->Value(i)->Value(aSeedIndex);
+          ProjLib_PrjResolve aRetry(*myCurve, *mySurface, 1);
+          aRetry.Perform(U, aSeed.Y(), aSeed.Z(), gp_Pnt2d(myTolU, myTolV),
+                         gp_Pnt2d(mySurface->FirstUParameter(), mySurface->FirstVParameter()),
+                         gp_Pnt2d(mySurface->LastUParameter(), mySurface->LastVParameter()),
+                         FuncTol);
+          if (!aRetry.IsDone())
+            continue;
+          gp_Pnt2d aUV = aRetry.Solution();
+          if (mySurface->IsUPeriodic()
+              && Abs(Abs(aUV.X() - aTriple.Y()) - mySurface->UPeriod()) < Precision::PConfusion())
+            aUV.SetX(aTriple.Y());
+          if (mySurface->IsVPeriodic()
+              && Abs(Abs(aUV.Y() - aTriple.Z()) - mySurface->VPeriod()) < Precision::PConfusion())
+            aUV.SetY(aTriple.Z());
+          if (aUV.X() < mySurface->FirstUParameter() || aUV.X() > mySurface->LastUParameter()
+              || aUV.Y() < mySurface->FirstVParameter() || aUV.Y() > mySurface->LastVParameter())
+            continue;
+          const gp_Pnt aCandidate(U, aUV.X(), aUV.Y());
+          const Standard_Real aDistance =
+            aCurvePoint.SquareDistance(mySurface->Value(aUV.X(), aUV.Y()));
+          if (!isSaddle(aCandidate) && aDistance < aBestDistance
+              && (myMaxDist <= 0.0 || aDistance <= myMaxDist * myMaxDist))
+          {
+            aTriple = aCandidate;
+            aBestDistance = aDistance;
+          }
+        }
+      }
+    }
+    P.SetCoord(aTriple.Y(), aTriple.Z());
+  }
   else
   {
     gp_Pnt        thePoint = myCurve->Value(U);
@@ -2106,6 +2175,24 @@ void ProjLib_CompProjectedCurve::UpdateTripleByTrapCriteria(gp_Pnt& thePoint) co
 {
   Standard_Boolean isProblemsPossible = Standard_False;
   // Check possible traps cases:
+
+  // At a singular extrusion boundary both surface derivatives may be parallel.
+  // A stationary distance there can be a saddle rather than the nearest point;
+  // reseed through the existing point/surface search before continuing the walk.
+  if (mySurface->GetType() == GeomAbs_SurfaceOfExtrusion
+      && (Abs(thePoint.Y() - mySurface->FirstUParameter()) <= myTolU
+          || Abs(thePoint.Y() - mySurface->LastUParameter()) <= myTolU))
+  {
+    gp_Pnt aPoint;
+    gp_Vec aDU, aDV;
+    mySurface->D1(thePoint.Y(), thePoint.Z(), aPoint, aDU, aDV);
+    const Standard_Real aScale = aDU.SquareMagnitude() * aDV.SquareMagnitude();
+    if (aDU.Crossed(aDV).SquareMagnitude()
+        <= Precision::Angular() * Precision::Angular() * aScale)
+    {
+      isProblemsPossible = Standard_True;
+    }
+  }
 
   // 25892 bug.
   if (mySurface->GetType() == GeomAbs_SurfaceOfRevolution)

@@ -20,6 +20,7 @@ gp_Cylinder.cxx
 gp_Cylinder.hxx
 gp_Dir.cxx
 gp_Dir.hxx
+gp_StoredRepresentation.hxx
 gp_Dir2d.cxx
 gp_Dir2d.hxx
 gp_Elips.cxx

@@ -55,6 +55,23 @@ class gp_Ax2
 public:
   DEFINE_STANDARD_ALLOC
 
+  //! Restores every saved axis through owner-member access within the bounded
+  //! native-representation domain. The frame must remain right-handed; invalid
+  //! input refuses and no axis is normalized or reconstructed.
+  static gp_Ax2 FromStoredFrame(const gp_Pnt& theOrigin, const gp_XYZ& theZ,
+                               const gp_XYZ& theX, const gp_XYZ& theY)
+  {
+    gp_StoredRepresentation::Finite(theOrigin.X());
+    gp_StoredRepresentation::Finite(theOrigin.Y());
+    gp_StoredRepresentation::Finite(theOrigin.Z());
+    gp_StoredRepresentation::RightHandedFrame(theZ,theX,theY);
+    gp_Ax2 aResult;
+    aResult.axis = gp_Ax1(theOrigin,gp_Dir::FromStoredCoordinates(theZ));
+    aResult.vxdir = gp_Dir::FromStoredCoordinates(theX);
+    aResult.vydir = gp_Dir::FromStoredCoordinates(theY);
+    return aResult;
+  }
+
   //! Creates an object corresponding to the reference
   //! coordinate system (OXYZ).
   gp_Ax2()

@@ -1,0 +1,25 @@
+// Private experimental helper for IntTools_FClass2d.
+// Distributed with the OCCT source under its LGPL 2.1 plus OCCT exception.
+#ifndef IntTools_FClass2dProjection_HeaderFile
+#define IntTools_FClass2dProjection_HeaderFile
+
+#include <ElCLib.hxx>
+#include <gp_Lin2d.hxx>
+#include <gp_Pnt2d.hxx>
+#include <gp_Vec2d.hxx>
+
+// Preserve line projection when its direction is defined. A degenerate chord
+// is a point: projecting to its start retains the middle sample's U/V
+// deviations instead of dropping the sample or inventing a direction.
+static gp_Pnt2d IntTools_FClass2dProjection(const gp_Pnt2d& theStart,
+                                         const gp_Pnt2d& theMiddle,
+                                         const gp_Pnt2d& theEnd)
+{
+  const gp_Vec2d aChord(theStart, theEnd);
+  if (aChord.Magnitude() <= gp::Resolution())
+    return theStart;
+  const gp_Lin2d aLine(theStart, gp_Dir2d(aChord));
+  return ElCLib::Value(ElCLib::Parameter(aLine, theMiddle), aLine);
+}
+
+#endif

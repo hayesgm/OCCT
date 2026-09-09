@@ -16,6 +16,7 @@
 #define _gp_Dir_HeaderFile
 
 #include <gp_XYZ.hxx>
+#include <gp_StoredRepresentation.hxx>
 #include <Standard_ConstructionError.hxx>
 #include <Standard_DomainError.hxx>
 #include <Standard_OutOfRange.hxx>
@@ -36,6 +37,16 @@ class gp_Dir
 {
 public:
   DEFINE_STANDARD_ALLOC
+
+  //! Restores saved native coordinates without normalization, after checking the
+  //! bounded binary64 unit representation domain. No comparison tolerance is used.
+  static gp_Dir FromStoredCoordinates(const gp_XYZ& theCoordinates)
+  {
+    gp_StoredRepresentation::Unit(theCoordinates);
+    gp_Dir aResult;
+    aResult.coord = theCoordinates;
+    return aResult;
+  }
 
   //! Creates a direction corresponding to X axis.
   gp_Dir()

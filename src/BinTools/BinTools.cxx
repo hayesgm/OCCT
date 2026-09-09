@@ -18,6 +18,60 @@
 #include <FSD_FileHeader.hxx>
 #include <OSD_FileSystem.hxx>
 #include <Storage_StreamTypeMismatchError.hxx>
+#include <Standard_DomainError.hxx>
+#include <TopLoc_Location.hxx>
+#include <cmath>
+
+namespace
+{
+int geometryPolicyIndex()
+{
+  static const int anIndex = std::ios_base::xalloc();
+  return anIndex;
+}
+}
+
+BinTools::GeometryReadPolicy BinTools::GeometryPolicy(Standard_IStream& theStream)
+{
+  const long aValue = theStream.iword(geometryPolicyIndex());
+  if (aValue != 0 && aValue != 1 && aValue != 2 && aValue != 3 && aValue != 4)
+    throw Standard_DomainError("unknown geometry read policy");
+  return static_cast<GeometryReadPolicy>(aValue);
+}
+
+BinTools::GeometryReadPolicy BinTools::SetGeometryPolicy(Standard_IStream& theStream,
+                                                       GeometryReadPolicy thePolicy)
+{
+  if (thePolicy != GeometryReadPolicy::Reconstruct
+      && thePolicy != GeometryReadPolicy::PreserveStoredLinePlane
+      && thePolicy != GeometryReadPolicy::PreserveStoredLinePlaneCircle
+      && thePolicy != GeometryReadPolicy::PreserveStoredLinePlaneCircleSphere
+      && thePolicy != GeometryReadPolicy::PreserveStoredLinePlaneCircleSphereRigidTransforms)
+    throw Standard_DomainError("unknown geometry read policy");
+  const auto aPrevious = GeometryPolicy(theStream);
+  theStream.iword(geometryPolicyIndex()) = static_cast<long>(thePolicy);
+  return aPrevious;
+}
+
+void BinTools::CheckFiniteLocation(const TopLoc_Location& theLocation)
+{
+  const gp_Trsf& aTransform = theLocation.Transformation();
+  if (!std::isfinite(aTransform.ScaleFactor()))
+    throw Standard_DomainError("nonfinite stored location arithmetic");
+  for (Standard_Integer aRow = 1; aRow <= 3; ++aRow)
+  {
+    for (Standard_Integer aCol = 1; aCol <= 3; ++aCol)
+    {
+      if (!std::isfinite(aTransform.HVectorialPart().Value(aRow, aCol)))
+        throw Standard_DomainError("nonfinite stored location arithmetic");
+    }
+    for (Standard_Integer aCol = 1; aCol <= 4; ++aCol)
+    {
+      if (!std::isfinite(aTransform.Value(aRow, aCol)))
+        throw Standard_DomainError("nonfinite stored location arithmetic");
+    }
+  }
+}
 
 //=================================================================================================
 

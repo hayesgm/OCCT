@@ -441,6 +441,21 @@ static Standard_IStream& operator>>(Standard_IStream& IS, gp_Ax3& A3)
 
 static Standard_IStream& operator>>(Standard_IStream& IS, Handle(Geom_Plane)& S)
 {
+  const auto aPolicy = BinTools::GeometryPolicy(IS);
+  if (aPolicy == BinTools::GeometryReadPolicy::PreserveStoredLinePlane
+      || aPolicy == BinTools::GeometryReadPolicy::PreserveStoredLinePlaneCircle
+      || aPolicy == BinTools::GeometryReadPolicy::PreserveStoredLinePlaneCircleSphere
+      || aPolicy == BinTools::GeometryReadPolicy::PreserveStoredLinePlaneCircleSphereRigidTransforms)
+  {
+    gp_Pnt P;
+    Standard_Real C[9] = {};
+    IS >> P;
+    for (Standard_Integer i=0;i<9;++i) BinTools::GetReal(IS,C[i]);
+    if (!IS) throw Standard_Failure("incomplete stored Plane payload");
+    S = new Geom_Plane(gp_Ax3::FromStoredFrame(P,gp_XYZ(C[0],C[1],C[2]),
+      gp_XYZ(C[3],C[4],C[5]),gp_XYZ(C[6],C[7],C[8])));
+    return IS;
+  }
   gp_Ax3 A;
   IS >> A;
   S = new Geom_Plane(A);
@@ -477,6 +492,25 @@ static Standard_IStream& operator>>(Standard_IStream& IS, Handle(Geom_ConicalSur
   S = new Geom_ConicalSurface(A, Ang, R);
   return IS;
 }
+Handle(Geom_SphericalSurface) BinTools::ReadStoredSphericalSurface(Standard_IStream& IS)
+{
+  Standard_Real C[13] = {};
+  try
+  {
+    for (Standard_Integer i=0;i<13;++i) BinTools::GetReal(IS,C[i]);
+  }
+  catch (const Standard_Failure&)
+  {
+    Standard_Failure::Raise("incomplete stored Sphere payload");
+  }
+  if (!IS) Standard_Failure::Raise("incomplete stored Sphere payload");
+  gp_StoredRepresentation::Finite(C[12]);
+  if (C[12] < 0.0) Standard_ConstructionError::Raise("negative stored Sphere radius");
+  return new Geom_SphericalSurface(gp_Ax3::FromStoredFrame(
+    gp_Pnt(C[0],C[1],C[2]),gp_XYZ(C[3],C[4],C[5]),
+    gp_XYZ(C[6],C[7],C[8]),gp_XYZ(C[9],C[10],C[11])),C[12]);
+}
+
 
 //=======================================================================
 // function : operator>>
@@ -485,6 +519,14 @@ static Standard_IStream& operator>>(Standard_IStream& IS, Handle(Geom_ConicalSur
 
 static Standard_IStream& operator>>(Standard_IStream& IS, Handle(Geom_SphericalSurface)& S)
 {
+  if (BinTools::GeometryPolicy(IS)
+        == BinTools::GeometryReadPolicy::PreserveStoredLinePlaneCircleSphere
+      || BinTools::GeometryPolicy(IS)
+        == BinTools::GeometryReadPolicy::PreserveStoredLinePlaneCircleSphereRigidTransforms)
+  {
+    S = BinTools::ReadStoredSphericalSurface(IS);
+    return IS;
+  }
   gp_Ax3        A;
   Standard_Real R = 0.;
   IS >> A;
