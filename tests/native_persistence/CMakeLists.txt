@@ -10,7 +10,7 @@ foreach(toolkit TKernel TKMath TKG2d TKG3d TKGeomBase TKBRep TKGeomAlgo TKTopAlg
   find_library(OCCT_TEST_${toolkit} NAMES ${toolkit} PATHS "${OCCT_ROOT}/lib" NO_DEFAULT_PATH REQUIRED)
   list(APPEND OCCT_TEST_LIBRARIES "${OCCT_TEST_${toolkit}}")
 endforeach()
-foreach(test stored_transforms analytic_readers projection_controls)
+foreach(test stored_transforms analytic_readers projection_controls acquired_edges closed_edges sliver_faces trimmed_hatches)
   add_executable(${test} ${test}.cxx)
   target_compile_features(${test} PRIVATE cxx_std_17)
   target_include_directories(${test} PRIVATE "${OCCT_TEST_INCLUDE}" "${CMAKE_CURRENT_SOURCE_DIR}/../../src/IntTools")
