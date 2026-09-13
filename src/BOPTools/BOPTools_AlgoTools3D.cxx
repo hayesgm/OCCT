@@ -943,6 +943,15 @@ Standard_Integer BOPTools_AlgoTools3D::PointInFace(const TopoDS_Face&           
     }
   }
   //
+  if (iErr != 0)
+  {
+    // When a closing boundary is absorbed into a tolerant vertex, the remaining
+    // boundaries can run parallel to the first hatch and leave its domain
+    // unbounded. Retry perpendicular with the same domain checks.
+    const Standard_Real aVy   = IntTools_Tools::IntermediatePoint(aVMin, aVMax);
+    Handle(Geom2d_Line) aLine = new Geom2d_Line(gp_Pnt2d(0., aVy), gp_Dir2d(1., 0.));
+    iErr = BOPTools_AlgoTools3D::PointInFace(theF, aLine, theP, theP2D, theContext);
+  }
   return iErr;
 }
 

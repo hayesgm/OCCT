@@ -1099,6 +1099,31 @@ void BOPAlgo_PaveFiller::ForceInterfEE(const Message_ProgressRange& theRange)
         // Check that the edges came from different arguments
         if (iR1 == iR2)
         {
+          // Canonical vertices may be new even when both endpoint incidences
+          // were already shared by these edges in the original argument.
+          Standard_Boolean hasFirst = Standard_False, hasSecond = Standard_False;
+          for (TColStd_ListIteratorOfListOfInteger aV1(myDS->ShapeInfo(nE1).SubShapes());
+               aV1.More(); aV1.Next())
+          {
+            for (TColStd_ListIteratorOfListOfInteger aV2(myDS->ShapeInfo(nE2).SubShapes());
+                 aV2.More(); aV2.Next())
+            {
+              if (aV1.Value() != aV2.Value())
+                continue;
+              Standard_Integer aCanonical = aV1.Value();
+              myDS->HasShapeSD(aV1.Value(), aCanonical);
+              hasFirst |= aCanonical == nV1;
+              hasSecond |= aCanonical == nV2;
+            }
+          }
+          // A single shared original vertex witnesses both incidences only
+          // when both original edges were closed at that vertex. Later vertex
+          // unification can also close originally open pave ranges.
+          const Standard_Boolean originallyClosed =
+            myDS->ShapeInfo(nE1).SubShapes().Extent() == 1
+            && myDS->ShapeInfo(nE2).SubShapes().Extent() == 1;
+          if (hasFirst && hasSecond && (nV1 != nV2 || originallyClosed))
+            continue;
           // If the sharing of the vertices is not original, but has been acquired
           // during the operation, check the coincidence of the edges even if
           // they came from the same argument
