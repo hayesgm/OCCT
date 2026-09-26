@@ -15,6 +15,7 @@
 #include <Adaptor3d_Surface.hxx>
 #include <Adaptor3d_HSurfaceTool.hxx>
 #include <Extrema_GenLocateExtPS.hxx>
+#include <CSLib.hxx>
 #include <Geom_Surface.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
@@ -621,6 +622,47 @@ static Standard_Real SQDistPointSurface(const gp_Pnt&            thePnt,
   return aExtPS.SquareDistance();
 }
 
+// Estimate the normal used by the local tangency check. Near a collapsed
+// parameter direction, normalizing D1U x D1V amplifies roundoff and can seed
+// a false transverse walking line. Recover a unique limiting normal from D2
+// as in GeomLib::NormEstim; failure leaves the tangency check inconclusive.
+static Standard_Boolean NormalForTangency(const Handle(Adaptor3d_Surface)& theSurface,
+                                          const Standard_Real theU,
+                                          const Standard_Real theV,
+                                          const Standard_Real theTolerance,
+                                          gp_Vec& theNormal)
+{
+  gp_Pnt aPoint;
+  gp_Vec aDU, aDV;
+  theSurface->D1(theU, theV, aPoint, aDU, aDV);
+  const Standard_Real aTol2 = Square(theTolerance);
+  if (aDU.SquareMagnitude() >= aTol2 && aDV.SquareMagnitude() >= aTol2)
+  {
+    theNormal = aDU.Crossed(aDV);
+    return Standard_True;
+  }
+
+  gp_Vec aD2U, aD2V, aD2UV;
+  try
+  {
+    theSurface->D2(theU, theV, aPoint, aDU, aDV, aD2U, aD2V, aD2UV);
+  }
+  catch (const Standard_Failure&)
+  {
+    // D2 is optional here; an adaptor with only D1 must retain ordinary walking.
+    return Standard_False;
+  }
+  Standard_Boolean isDone = Standard_False;
+  CSLib_NormalStatus aStatus;
+  gp_Dir aNormal;
+  CSLib::Normal(aDU, aDV, aD2U, aD2V, aD2UV, Precision::Angular(),
+                isDone, aStatus, aNormal);
+  if (!isDone)
+    return Standard_False;
+  theNormal = gp_Vec(aNormal);
+  return Standard_True;
+}
+
 //==================================================================================
 // function : IsTangentExtCheck
 // purpose  : Additional check if the surfaces are tangent.
@@ -637,12 +679,11 @@ static Standard_Boolean IsTangentExtCheck(const Handle(Adaptor3d_Surface)& theSu
                                           const Standard_Real              theArrStep[])
 {
   {
-    gp_Pnt aPt;
-    gp_Vec aDu1, aDv1, aDu2, aDv2;
-    theSurf1->D1(theU10, theV10, aPt, aDu1, aDv1);
-    theSurf2->D1(theU20, theV20, aPt, aDu2, aDv2);
+    gp_Vec aN1, aN2;
+    if (!NormalForTangency(theSurf1, theU10, theV10, theToler, aN1)
+        || !NormalForTangency(theSurf2, theU20, theV20, theToler, aN2))
+      return Standard_False;
 
-    const gp_Vec        aN1(aDu1.Crossed(aDv1)), aN2(aDu2.Crossed(aDv2));
     const Standard_Real aDP = aN1.Dot(aN2), aSQ1 = aN1.SquareMagnitude(),
                         aSQ2 = aN2.SquareMagnitude();
 
