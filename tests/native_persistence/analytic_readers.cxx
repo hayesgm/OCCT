@@ -19,6 +19,7 @@
 
 using Values = std::vector<double>;
 using Policy = BinTools::GeometryReadPolicy;
+#include "stored_underflow_frame.hxx"
 
 static void require(bool condition, const char* message)
 {
@@ -122,6 +123,16 @@ int main()
 {
   try
   {
+    const Values underflowPlane(std::begin(THE_UNDERFLOW_FRAME),std::end(THE_UNDERFLOW_FRAME));
+    for (Policy policy : {Policy::PreserveStoredLinePlaneCircleSphere,
+                          Policy::PreserveStoredLinePlaneCircleSphereRigidTransforms})
+    {
+      const Values first=decode(2,underflowPlane,policy);
+      require(exact(first,underflowPlane),"underflow plane reader changed coefficient bits");
+      require(exact(decode(2,first,policy),underflowPlane),"repeated underflow plane changed bits");
+    }
+    require(decode(2,underflowPlane,Policy::Reconstruct).size()==12,
+            "underflow plane default reconstruction failed");
     for (int family = 0; family != 4; ++family)
     {
       const Values input = payload(family);

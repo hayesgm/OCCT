@@ -7,12 +7,18 @@
 #include <algorithm>
 #include <array>
 #include <cfenv>
+#include <cfloat>
+#if defined(__linux__) && defined(__x86_64__) && defined(__SSE2__)
+#include <xmmintrin.h>
+#endif
 #include <cmath>
 #include <limits>
 
 //! Arithmetic-domain checks for exact restoration, never an equivalence tolerance.
-//! Inputs and nonzero arithmetic intermediates must be normal finite binary64 values.
-//! Round-to-nearest is required. Overflow/underflow and unsupported domains refuse.
+//! Raw inputs are normal finite binary64 or zero; finite subnormal intermediates
+//! are enclosed without changing stored coefficients. Gradual underflow and
+//! nearest rounding are required. Rounded-zero intermediates are enclosed;
+//! overflow and nonfinite values refuse.
 namespace gp_StoredRepresentation
 {
 struct Interval { double Lo, Hi; };
@@ -20,10 +26,35 @@ inline void Check(bool theOK, const char* theMessage)
 {
   if (!theOK) Standard_ConstructionError::Raise(theMessage);
 }
+// Sticky status flags do not change arithmetic; only control bits participate.
+inline bool Binary64Control(unsigned long long theControl)
+{
+#if defined(__APPLE__) && defined(__arm64__)
+  // FPCR: rounding[23:22], FZ[24], FIZ[0], AH[1], exception enables[12:8,15].
+  return (theControl & (0x00c00000ULL | 0x01000000ULL | 0x3ULL | 0x9f00ULL)) == 0;
+#elif defined(__linux__) && defined(__x86_64__) && defined(__SSE2__)
+  // MXCSR: rounding[14:13], FTZ[15], DAZ[6], all exception masks[12:7].
+  return (theControl & 0xe040ULL) == 0 && (theControl & 0x1f80ULL) == 0x1f80ULL;
+#else
+  (void)theControl;
+  return false;
+#endif
+}
 inline void Arithmetic()
 {
   Check(std::numeric_limits<double>::is_iec559 && std::numeric_limits<double>::digits == 53
-    && std::fegetround() == FE_TONEAREST, "stored geometry requires nearest binary64 arithmetic");
+    && FLT_EVAL_METHOD == 0 && std::fegetround() == FE_TONEAREST,
+    "stored geometry requires nearest binary64 arithmetic");
+#if defined(__APPLE__) && defined(__arm64__)
+  std::fenv_t anEnvironment;
+  Check(std::fegetenv(&anEnvironment) == 0 && Binary64Control(anEnvironment.__fpcr),
+    "stored geometry requires gradual masked binary64 arithmetic");
+#elif defined(__linux__) && defined(__x86_64__) && defined(__SSE2__)
+  Check(Binary64Control(_mm_getcsr()),
+    "stored geometry requires gradual masked binary64 arithmetic");
+#else
+  Check(false, "stored geometry arithmetic platform is unsupported");
+#endif
 }
 inline void Finite(double theValue)
 {
@@ -37,20 +68,27 @@ inline void NormalOrZero(double theValue)
 inline double AddEnd(double a, double b, bool theUp)
 {
   const double r = a + b;
-  NormalOrZero(r);
+  Finite(r);
   if (r == 0.0) {
     Check(a == -b, "stored geometry addition underflow"); return r;
   }
   if (a == 0.0 || b == 0.0) return r;
-  return std::nextafter(r, theUp ? INFINITY : -INFINITY);
+  const double bound = std::nextafter(r, theUp ? INFINITY : -INFINITY);
+  Finite(bound);
+  return bound;
 }
 inline double MulEnd(double a, double b, bool theUp)
 {
   const double r = a * b;
-  NormalOrZero(r);
+  Finite(r);
   if (a == 0.0 || b == 0.0) return r;
-  Check(r != 0.0, "stored geometry multiplication underflow");
-  return std::nextafter(r, theUp ? INFINITY : -INFINITY);
+  // With nearest rounding and gradual underflow, the adjacent representable
+  // values enclose the exact product even when r is signed zero. Nonzero
+  // operands then produce [-denorm_min, +denorm_min], not an exact-zero claim.
+  // Genuine zero operands retain their exact signed zero in the branch above.
+  const double bound = std::nextafter(r, theUp ? INFINITY : -INFINITY);
+  Finite(bound);
+  return bound;
 }
 inline Interval Add(Interval a, Interval b)
 {
