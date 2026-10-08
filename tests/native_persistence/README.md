@@ -57,3 +57,36 @@ ranges have been initialized. The unchanged long ranges must form a common
 block through the existing coincidence comparison; a separated-tool control
 retains open ranges and no common block. Read-only stage observations establish
 the late transition without injecting paves or changing execution order.
+
+* `stored_arithmetic` checks exact dyadic interval enclosures across signed gradual
+  underflow, the normal boundary, endpoint reuse, ties and cancellation; raw
+  subnormal coefficients, nonfinite/overflow and invalid-frame refusals remain.
+  Nonzero products rounded to signed zero use conservative outward endpoints;
+  genuinely zero operands retain their exact signed-zero result. Half-minimum-
+  subnormal ties and neighboring values are checked against exact dyadics.
+  Two saved frames preserve all twelve coefficient bits, including one with both
+  rounded-zero and nonzero-subnormal squared components. The same plane payload
+  is exercised by both preserving policies in the installed analytic reader.
+  The companion
+  Python generator regenerates the exact integer/Fraction oracle table; its
+  `--check` option compares that table without changing files. macOS
+  arm64 and Linux x86_64 require nearest binary64, gradual underflow and masked
+  exceptions; other targets refuse. The test restores the entire floating-point
+  environment after live supported-mode controls. AH/FIZ and trap controls are
+  classified without enabling unsupported hardware modes or live traps.
+
+These arithmetic checks require ordinary precise binary64 compiler semantics:
+no unsafe reassociation, finite-only assumptions, signed-zero elision or excess
+precision. The runtime mode gate does not repair unsafe compiler options. Mode
+mutation is test-local; production neither changes nor caches the caller mode.
+
+* `stored_macro_pollution` preloads the arithmetic header's dependencies, then
+  defines function-like `min`/`max` macros before including the exact checkout
+  header. It refuses a preincluded target header and checks that caller macros
+  remain usable. This isolates macro-safe call spelling; it does not extend the
+  supported arithmetic platforms or establish Windows runtime qualification.
+  When testing a header-only correction with an unchanged installed library,
+  the ordinary `stored_arithmetic` control must also compile the exact checkout
+  header before `gp_Ax3.hxx` (for Clang, `-include` the absolute header path).
+  Retain compiler dependencies/include tracing to prove that an installed old
+  header and its include guard did not satisfy the control instead.

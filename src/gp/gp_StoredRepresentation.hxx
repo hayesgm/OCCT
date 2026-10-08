@@ -7,83 +7,156 @@
 #include <algorithm>
 #include <array>
 #include <cfenv>
+#include <cfloat>
+#if defined(__linux__) && defined(__x86_64__) && defined(__SSE2__)
+  #include <xmmintrin.h>
+#endif
 #include <cmath>
 #include <limits>
 
 //! Arithmetic-domain checks for exact restoration, never an equivalence tolerance.
-//! Inputs and nonzero arithmetic intermediates must be normal finite binary64 values.
-//! Round-to-nearest is required. Overflow/underflow and unsupported domains refuse.
+//! Raw inputs are normal finite binary64 or zero; finite subnormal intermediates
+//! are enclosed without changing stored coefficients. Gradual underflow and
+//! nearest rounding are required. Rounded-zero intermediates are enclosed;
+//! overflow and nonfinite values refuse.
 namespace gp_StoredRepresentation
 {
-struct Interval { double Lo, Hi; };
+struct Interval
+{
+  double Lo, Hi;
+};
+
 inline void Check(bool theOK, const char* theMessage)
 {
-  if (!theOK) Standard_ConstructionError::Raise(theMessage);
+  if (!theOK)
+    Standard_ConstructionError::Raise(theMessage);
 }
+
+// Sticky status flags do not change arithmetic; only control bits participate.
+inline bool Binary64Control(unsigned long long theControl)
+{
+#if defined(__APPLE__) && defined(__arm64__)
+  // FPCR: rounding[23:22], FZ[24], FIZ[0], AH[1], exception enables[12:8,15].
+  return (theControl & (0x00c00000ULL | 0x01000000ULL | 0x3ULL | 0x9f00ULL)) == 0;
+#elif defined(__linux__) && defined(__x86_64__) && defined(__SSE2__)
+  // MXCSR: rounding[14:13], FTZ[15], DAZ[6], all exception masks[12:7].
+  return (theControl & 0xe040ULL) == 0 && (theControl & 0x1f80ULL) == 0x1f80ULL;
+#else
+  (void)theControl;
+  return false;
+#endif
+}
+
 inline void Arithmetic()
 {
   Check(std::numeric_limits<double>::is_iec559 && std::numeric_limits<double>::digits == 53
-    && std::fegetround() == FE_TONEAREST, "stored geometry requires nearest binary64 arithmetic");
+          && FLT_EVAL_METHOD == 0 && std::fegetround() == FE_TONEAREST,
+        "stored geometry requires nearest binary64 arithmetic");
+#if defined(__APPLE__) && defined(__arm64__)
+  std::fenv_t anEnvironment;
+  Check(std::fegetenv(&anEnvironment) == 0 && Binary64Control(anEnvironment.__fpcr),
+        "stored geometry requires gradual masked binary64 arithmetic");
+#elif defined(__linux__) && defined(__x86_64__) && defined(__SSE2__)
+  Check(Binary64Control(_mm_getcsr()),
+        "stored geometry requires gradual masked binary64 arithmetic");
+#else
+  Check(false, "stored geometry arithmetic platform is unsupported");
+#endif
 }
+
 inline void Finite(double theValue)
 {
   Check(std::isfinite(theValue), "stored geometry has a nonfinite coefficient");
 }
+
 inline void NormalOrZero(double theValue)
 {
   Finite(theValue);
   Check(theValue == 0.0 || std::isnormal(theValue), "stored geometry arithmetic subnormal domain");
 }
+
 inline double AddEnd(double a, double b, bool theUp)
 {
   const double r = a + b;
-  NormalOrZero(r);
-  if (r == 0.0) {
-    Check(a == -b, "stored geometry addition underflow"); return r;
+  Finite(r);
+  if (r == 0.0)
+  {
+    Check(a == -b, "stored geometry addition underflow");
+    return r;
   }
-  if (a == 0.0 || b == 0.0) return r;
-  return std::nextafter(r, theUp ? INFINITY : -INFINITY);
+  if (a == 0.0 || b == 0.0)
+    return r;
+  const double bound = std::nextafter(r, theUp ? INFINITY : -INFINITY);
+  Finite(bound);
+  return bound;
 }
+
 inline double MulEnd(double a, double b, bool theUp)
 {
   const double r = a * b;
-  NormalOrZero(r);
-  if (a == 0.0 || b == 0.0) return r;
-  Check(r != 0.0, "stored geometry multiplication underflow");
-  return std::nextafter(r, theUp ? INFINITY : -INFINITY);
+  Finite(r);
+  if (a == 0.0 || b == 0.0)
+    return r;
+  // With nearest rounding and gradual underflow, the adjacent representable
+  // values enclose the exact product even when r is signed zero. Nonzero
+  // operands then produce [-denorm_min, +denorm_min], not an exact-zero claim.
+  // Genuine zero operands retain their exact signed zero in the branch above.
+  const double bound = std::nextafter(r, theUp ? INFINITY : -INFINITY);
+  Finite(bound);
+  return bound;
 }
+
 inline Interval Add(Interval a, Interval b)
 {
-  return {AddEnd(a.Lo,b.Lo,false), AddEnd(a.Hi,b.Hi,true)};
+  return {AddEnd(a.Lo, b.Lo, false), AddEnd(a.Hi, b.Hi, true)};
 }
-inline Interval Neg(Interval a) { return {-a.Hi,-a.Lo}; }
+
+inline Interval Neg(Interval a)
+{
+  return {-a.Hi, -a.Lo};
+}
+
 inline Interval Mul(Interval a, Interval b)
 {
-  const std::array<double,4> lo = {MulEnd(a.Lo,b.Lo,false),MulEnd(a.Lo,b.Hi,false),
-    MulEnd(a.Hi,b.Lo,false),MulEnd(a.Hi,b.Hi,false)};
-  const std::array<double,4> hi = {MulEnd(a.Lo,b.Lo,true),MulEnd(a.Lo,b.Hi,true),
-    MulEnd(a.Hi,b.Lo,true),MulEnd(a.Hi,b.Hi,true)};
-  return {*std::min_element(lo.begin(),lo.end()),*std::max_element(hi.begin(),hi.end())};
+  const std::array<double, 4> lo = {MulEnd(a.Lo, b.Lo, false),
+                                    MulEnd(a.Lo, b.Hi, false),
+                                    MulEnd(a.Hi, b.Lo, false),
+                                    MulEnd(a.Hi, b.Hi, false)};
+  const std::array<double, 4> hi = {MulEnd(a.Lo, b.Lo, true),
+                                    MulEnd(a.Lo, b.Hi, true),
+                                    MulEnd(a.Hi, b.Lo, true),
+                                    MulEnd(a.Hi, b.Hi, true)};
+  return {*std::min_element(lo.begin(), lo.end()), *std::max_element(hi.begin(), hi.end())};
 }
-inline Interval Point(double a) { NormalOrZero(a); return {a,a}; }
+
+inline Interval Point(double a)
+{
+  NormalOrZero(a);
+  return {a, a};
+}
+
 inline Interval Abs(Interval a)
 {
-  return {a.Lo <= 0.0 && a.Hi >= 0.0 ? 0.0 : std::min(std::abs(a.Lo),std::abs(a.Hi)),
-    std::max(std::abs(a.Lo),std::abs(a.Hi))};
+  return {a.Lo <= 0.0 && a.Hi >= 0.0 ? 0.0 : (std::min)(std::abs(a.Lo), std::abs(a.Hi)),
+          (std::max)(std::abs(a.Lo), std::abs(a.Hi))};
 }
+
 inline Interval Dot(const gp_XYZ& a, const gp_XYZ& b)
 {
-  Interval r = {0,0};
-  for (int i=1;i<=3;++i) r=Add(r,Mul(Point(a.Coord(i)),Point(b.Coord(i))));
+  Interval r = {0, 0};
+  for (int i = 1; i <= 3; ++i)
+    r = Add(r, Mul(Point(a.Coord(i)), Point(b.Coord(i))));
   return r;
 }
+
 inline Interval Gamma(unsigned n)
 {
-  const double nu = n * 0x1p-53; // Exact for these small integer operation counts.
-  const double denominator = 1.0 - nu; // Exact binary64 here.
-  const double r = nu / denominator;
-  return {std::nextafter(r,-INFINITY),std::nextafter(r,INFINITY)};
+  const double nu          = n * 0x1p-53; // Exact for these small integer operation counts.
+  const double denominator = 1.0 - nu;    // Exact binary64 here.
+  const double r           = nu / denominator;
+  return {std::nextafter(r, -INFINITY), std::nextafter(r, INFINITY)};
 }
+
 inline Interval FrameAngularEnvelope()
 {
   // This is an explicit algebraic stored-representation invariant, not
@@ -100,52 +173,63 @@ inline Interval FrameAngularEnvelope()
   // otherwise explain them.
   return Gamma(32);
 }
+
 inline void Unit(const gp_XYZ& a)
 {
   Arithmetic();
   // Existing normalization: positive square/sum (three rounding factors), sqrt
   // (squared factor), and division (squared factor) imply norm^2 within
   // [(1-u)^2/(1+u)^5, (1+u)^2/(1-u)^5], enclosed by 1 +/- gamma_7.
-  const Interval norm = Dot(a,a);
+  const Interval norm  = Dot(a, a);
   const Interval gamma = Gamma(7);
-  const double lo = AddEnd(1.0,-gamma.Hi,false);
-  const double hi = AddEnd(1.0,gamma.Hi,true);
+  const double   lo    = AddEnd(1.0, -gamma.Hi, false);
+  const double   hi    = AddEnd(1.0, gamma.Hi, true);
   Check(norm.Lo >= lo && norm.Hi <= hi, "stored direction outside binary64 unit domain");
 }
+
 inline void Orthogonal(const gp_XYZ& a, const gp_XYZ& b)
 {
-  const Interval dot = Dot(a,b);
+  const Interval dot = Dot(a, b);
   // The finite absolute angular envelope is dimensionless. It never compares,
   // changes, or snaps geometric lengths and carries no producer-path claim.
   const Interval angular = FrameAngularEnvelope();
-  Check(std::max(std::abs(dot.Lo),std::abs(dot.Hi)) <= angular.Hi,
-    "stored frame outside binary64 orthogonality domain");
+  Check((std::max)(std::abs(dot.Lo), std::abs(dot.Hi)) <= angular.Hi,
+        "stored frame outside binary64 orthogonality domain");
 }
+
 inline Interval FrameDeterminant(const gp_XYZ& theZ, const gp_XYZ& theX, const gp_XYZ& theY)
 {
-  std::array<Interval,3> cross;
-  for (int i=0;i<3;++i) {
-    const int j=(i+1)%3+1,k=(i+2)%3+1;
-    cross[i]=Add(Mul(Point(theX.Coord(j)),Point(theY.Coord(k))),
-      Neg(Mul(Point(theX.Coord(k)),Point(theY.Coord(j)))));
+  std::array<Interval, 3> cross;
+  for (int i = 0; i < 3; ++i)
+  {
+    const int j = (i + 1) % 3 + 1, k = (i + 2) % 3 + 1;
+    cross[i] = Add(Mul(Point(theX.Coord(j)), Point(theY.Coord(k))),
+                   Neg(Mul(Point(theX.Coord(k)), Point(theY.Coord(j)))));
   }
-  Interval determinant={0,0};
-  for (int i=0;i<3;++i) determinant=Add(determinant,Mul(cross[i],Point(theZ.Coord(i+1))));
+  Interval determinant = {0, 0};
+  for (int i = 0; i < 3; ++i)
+    determinant = Add(determinant, Mul(cross[i], Point(theZ.Coord(i + 1))));
   return determinant;
 }
+
 inline void Frame(const gp_XYZ& theZ, const gp_XYZ& theX, const gp_XYZ& theY)
 {
-  Unit(theZ); Unit(theX); Unit(theY);
-  Orthogonal(theZ,theX); Orthogonal(theZ,theY); Orthogonal(theX,theY);
-  const Interval determinant=FrameDeterminant(theZ,theX,theY);
+  Unit(theZ);
+  Unit(theX);
+  Unit(theY);
+  Orthogonal(theZ, theX);
+  Orthogonal(theZ, theY);
+  Orthogonal(theX, theY);
+  const Interval determinant = FrameDeterminant(theZ, theX, theY);
   Check(determinant.Lo > 0.0 || determinant.Hi < 0.0,
-    "stored frame has unresolved or zero handedness");
+        "stored frame has unresolved or zero handedness");
 }
+
 inline void RightHandedFrame(const gp_XYZ& theZ, const gp_XYZ& theX, const gp_XYZ& theY)
 {
-  Frame(theZ,theX,theY);
-  Check(FrameDeterminant(theZ,theX,theY).Lo > 0.0,
-    "stored right-handed frame has negative or unresolved determinant");
+  Frame(theZ, theX, theY);
+  Check(FrameDeterminant(theZ, theX, theY).Lo > 0.0,
+        "stored right-handed frame has negative or unresolved determinant");
 }
-}
+} // namespace gp_StoredRepresentation
 #endif
